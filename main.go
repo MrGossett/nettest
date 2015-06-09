@@ -84,8 +84,7 @@ func main() {
 	go http.ListenAndServe("0.0.0.0:8080", http.HandlerFunc(noopHandler))
 
 	wg := sync.WaitGroup{}
-	ticker := time.NewTicker(time.Second * 5)
-	for {
+	for range time.Tick(time.Second * 5) {
 		stats := Stats{msi: map[string]interface{}{}}
 
 		wg.Add(4)
@@ -97,8 +96,6 @@ func main() {
 		wg.Wait()
 
 		sm.Info("stats", stats.msi)
-
-		<-ticker.C
 	}
 }
 
@@ -115,9 +112,17 @@ func checkResolve(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 		return
 	}
 
-	duration := time.Now().Sub(timeStart)
+	stats.Set("resolve."+host+".time", time.Since(timeStart))
+}
 
-	stats.Set("resolve."+host+".time", duration)
+var icmpMsg = icmp.Message{
+	Type: ipv4.ICMPTypeEcho,
+	Code: 0,
+	Body: &icmp.Echo{
+		ID:   1,
+		Seq:  1,
+		Data: []byte("foo bar"),
+	},
 }
 
 func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
@@ -125,7 +130,6 @@ func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 
 	timeStart := time.Now()
 
-	//c, err := icmp.ListenPacket("udp4", "0.0.0.0")
 	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		sm.Error("unable to listen for udp", sm.Fields{"error": err})
@@ -133,16 +137,7 @@ func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 	}
 	defer c.Close()
 
-	m := icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
-		Code: 0,
-		Body: &icmp.Echo{
-			ID:   1,
-			Seq:  1,
-			Data: []byte("foo bar"),
-		},
-	}
-	mm, err := m.Marshal(nil)
+	mm, err := icmpMsg.Marshal(nil)
 	if err != nil {
 		sm.Error("unable to marshal message", sm.Fields{"error": err})
 		return
@@ -150,7 +145,6 @@ func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 
 	c.SetDeadline(time.Now().Add(time.Second))
 
-	//if _, err := c.WriteTo(mm, &net.UDPAddr{IP: net.ParseIP(addr)}); err != nil {
 	if _, err := c.WriteTo(mm, &net.IPAddr{IP: net.ParseIP(addr)}); err != nil {
 		sm.Error("unable to send echo request", sm.Fields{"error": err})
 		return
@@ -163,7 +157,7 @@ func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 		return
 	}
 
-	if false {
+	if false /* will never execute */ {
 		_, err := icmp.ParseMessage(iana.ProtocolIPv6ICMP, rb[:n])
 		if err != nil {
 			sm.Error("unable to parse response", sm.Fields{"error": err})
@@ -171,7 +165,5 @@ func checkPing(host string, addr string, wg *sync.WaitGroup, stats *Stats) {
 		}
 	}
 
-	duration := time.Now().Sub(timeStart)
-
-	stats.Set("ping."+host+".time", duration)
+	stats.Set("ping."+host+".time", time.Since(timeStart))
 }
